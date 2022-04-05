@@ -1,4 +1,5 @@
 // Copyright 2018-2022 the Deno authors. All rights reserved. MIT license.
+extern crate libc;
 
 mod auth_tokens;
 mod cache;
@@ -104,6 +105,9 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::ffi::CStr;
+use std::str;
+use libc::c_char;
 
 fn create_web_worker_preload_module_callback(
   ps: ProcState,
@@ -1484,3 +1488,56 @@ pub fn main() {
 
   std::process::exit(exit_code);
 }
+
+
+#[no_mangle]
+pub extern fn lib_main(command: * const i8, args_length: i32) {
+  let c_buf: *const c_char =  command;
+  let c_str: &CStr = unsafe { CStr::from_ptr(c_buf) };
+  let str_slice: &str = c_str.to_str().unwrap();
+  let str_buf :String  = str_slice.to_owned(); 
+
+  let str_args = str_buf.split_whitespace().collect::<Vec<&str>>();
+  let mut args: Vec<String> = Vec::new();
+  for str_item in str_args {
+    args.push(str_item.to_owned());
+  }
+  let exit_code = async move {
+    let standalone_res =
+      match standalone::extract_standalone(args.clone()).await {
+        Ok(Some((metadata, eszip))) => standalone::run(eszip, metadata).await,
+        Ok(None) => Ok(()),
+        Err(err) => Err(err),
+      };
+    // TODO(bartlomieju): doesn't handle exit code set by the runtime properly
+    unwrap_or_exit(standalone_res);
+
+    let flags = match flags::flags_from_vec(args) {
+      Ok(flags) => flags,
+      Err(err @ clap::Error { .. })
+        if err.kind() == clap::ErrorKind::DisplayHelp
+          || err.kind() == clap::ErrorKind::DisplayVersion =>
+      {
+        err.print().unwrap();
+        std::process::exit(0);
+      }
+      Err(err) => unwrap_or_exit(Err(AnyError::from(err))),
+    };
+    if !flags.v8_flags.is_empty() {
+      init_v8_flags(&*flags.v8_flags);
+    }
+
+    logger::init(flags.log_level);
+
+    let exit_code = get_subcommand(flags).await;
+
+    exit_code
+  };
+
+  let exit_code = unwrap_or_exit(run_basic(exit_code));
+
+  // std::process::exit(exit_code);
+  // exit_code
+  println!("libdeno lib_main exit_code {}", exit_code);
+}
+
