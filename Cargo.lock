@@ -1158,6 +1158,8 @@ dependencies = [
  "deno_tls",
  "http",
  "hyper",
+ "lazy_static",
+ "libc",
  "serde",
  "tokio",
  "tokio-rustls",

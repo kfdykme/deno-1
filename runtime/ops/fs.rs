@@ -562,6 +562,28 @@ async fn op_mkdir_async(
   .unwrap()
 }
 
+
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct libSocketArgs {
+  name: String,
+  data: String
+}
+#[op]
+fn op_deno2lib(state: &mut OpState, args: libSocketArgs) -> Result<i64, AnyError> {
+  // 执行一个c++ callback
+  Ok(2333)
+}
+
+
+#[op]
+fn op_lib2deno(state: &mut OpState, args: libSocketArgs) -> Result<i64, AnyError> {
+  // 找到根据名字找到libsocket 给他send数据
+  Ok(2333)
+}
+
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChmodArgs {

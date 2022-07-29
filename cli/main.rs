@@ -1489,7 +1489,6 @@ pub fn main() {
   std::process::exit(exit_code);
 }
 
-
 #[no_mangle]
 pub extern fn lib_main(command: * const i8, args_length: i32) {
   let c_buf: *const c_char =  command;

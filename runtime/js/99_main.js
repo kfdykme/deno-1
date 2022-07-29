@@ -51,6 +51,7 @@ delete Object.prototype.__proto__;
   const fileReader = window.__bootstrap.fileReader;
   const webgpu = window.__bootstrap.webgpu;
   const webSocket = window.__bootstrap.webSocket;
+  const libSocket = window.__bootstrap.libSocket;
   const webStorage = window.__bootstrap.webStorage;
   const broadcastChannel = window.__bootstrap.broadcastChannel;
   const file = window.__bootstrap.file;
@@ -405,6 +406,7 @@ delete Object.prototype.__proto__;
     URLPattern: util.nonEnumerable(urlPattern.URLPattern),
     URLSearchParams: util.nonEnumerable(url.URLSearchParams),
     WebSocket: util.nonEnumerable(webSocket.WebSocket),
+    LibSocket: util.nonEnumerable(libSocket.LibSocket),
     MessageChannel: util.nonEnumerable(messagePort.MessageChannel),
     MessagePort: util.nonEnumerable(messagePort.MessagePort),
     Worker: util.nonEnumerable(worker.Worker),

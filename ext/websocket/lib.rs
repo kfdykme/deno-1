@@ -48,6 +48,13 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::tungstenite::protocol::Role;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
+use libc::c_char;
+use std::sync::Mutex;
+use std::sync::Condvar;
+use lazy_static::lazy_static;
+use std::sync::mpsc;
+use std::ffi::CStr;
+use std::thread::spawn;
 
 pub use tokio_tungstenite; // Re-export tokio_tungstenite
 
@@ -188,6 +195,53 @@ impl Resource for WsCancelResource {
   }
 }
 
+// static (global_lib_socket_tx, global_lib_socket_rx):{Sender<String>, Receiver<String>} = mpsc::channel();
+lazy_static! {
+  static ref NAMES: Mutex<String> = Mutex::new(String::from(""));
+}
+
+
+#[no_mangle]
+pub extern fn lib_socket_send(command: * const i8) {
+  // mut global_lib_socket_rx: Option<Receiver<String>> = None;
+  let c_buf: *const c_char =  command;
+  let c_str: &CStr = unsafe { CStr::from_ptr(c_buf) };
+  let str_slice: &str = c_str.to_str().unwrap();
+  let str_buf :String  = str_slice.to_owned(); 
+  
+  // lib_socket_send_message(str_buf);
+  // *global_lib_socket_message = String::from("aa");
+  let mut v = NAMES.lock().unwrap();
+  *v = str_buf;
+  // REQUEST_RECV = String::from("aa");
+}
+
+
+pub fn lib_socket_send_message(message: String) {
+  // let msg = 
+  // let v = global_lib_socket_message_sender_mutex.lock().unwrap();
+  // global_lib_socket_tx?.send(message).unwrap();
+  // let mut msg = global_lib_socket_message_mutex.lock().unwrap();
+  // *msg = message; 
+  // global_lib_socket_message = message;
+  // *global_lib_socket_message_mutex.lock().unwrap() = true;
+  // global_lib_socket_message_cond.notify_one();
+}
+
+pub struct LsStreamResource {
+  
+}
+
+impl LsStreamResource {
+
+}
+
+impl Resource for LsStreamResource {
+  fn name(&self) -> Cow<str> {
+    "libSocketStream".into()
+  }
+}
+
 // This op is needed because creating a WS instance in JavaScript is a sync
 // operation and should throw error when permissions are not fulfilled,
 // but actual op that connects WS is async.
@@ -216,11 +270,64 @@ where
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateLibSocketResponse {
+  rid: ResourceId,
+}
+
+#[op]
+pub async fn op_ls_create(
+  state: Rc<RefCell<OpState>>
+) -> Result<CreateLibSocketResponse, AnyError>
+{
+  let resource = LsStreamResource {
+  };
+
+  let mut state = state.borrow_mut();
+  let rid = state.resource_table.add(resource);
+
+  Ok(CreateLibSocketResponse{
+    rid
+  })
+}
+
+static mut CALLBACK_HODLER: Option<extern fn(* const u8)> = Option::None;
+
+#[no_mangle]
+pub extern fn init_lib_socket_send_out_callback(func: extern fn(* const u8)) { 
+    unsafe {
+      CALLBACK_HODLER = Option::Some(func);
+  }
+}
+
+#[op]
+pub async fn op_deno2lib(
+  state: Rc<RefCell<OpState>>,
+  message: String
+) -> Result<(), AnyError> 
+{
+
+  unsafe {
+    if !CALLBACK_HODLER.is_none() {
+        let callback: extern fn(* const u8) = CALLBACK_HODLER.unwrap();
+        let mut send_message = message.clone();
+        
+        send_message.push('\0');
+
+        callback(send_message.as_ptr());
+    }
+  }
+
+  Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateResponse {
   rid: ResourceId,
   protocol: String,
   extensions: String,
 }
+
 
 #[op]
 pub async fn op_ws_create<WP>(
@@ -431,6 +538,48 @@ pub enum NextEventResponse {
   Closed,
 }
 
+
+#[op]
+pub async fn op_ls_next_event(
+  state: Rc<RefCell<OpState>>,
+  rid: ResourceId,
+) -> Result<NextEventResponse, AnyError> {
+  // let msg = global_lib_socket_message_mutex.lock().unwrap();
+
+  // let cflag = global_lib_socket_message_mutex.clone();
+  // let ccond = global_lib_socket_message_cond.clone();
+  // let msg = global_lib_socket_message.clone();
+  // let hdl = spawn(move || {
+  //   let mut m = { *cflag.lock().unwrap() };
+  //     while !m {
+  //         m = *ccond.wait(cflag.lock().unwrap()).unwrap();
+  //     }
+
+  //     {
+  //         m = false;
+  //         *cflag.lock().unwrap() = false;
+  //     }
+  // });
+  // hdl.join().unwrap();
+  // let mut msg = String::from("'");
+
+  // while !msg.equal(&String::from("undefined")) {
+  //   msg = global_lib_socket_message.lock.unwrap();
+  // }
+  
+ 
+  let mut msg = String::from("try");
+  let empty:String = String::from("");
+  while msg.eq(&empty) {
+    let v = NAMES.lock().unwrap();
+    msg = v.clone();
+  }
+
+  let mut v = NAMES.lock().unwrap();
+  *v = String::from("");
+  Ok(NextEventResponse::String(msg))
+}
+
 #[op]
 pub async fn op_ws_next_event(
   state: Rc<RefCell<OpState>>,
@@ -475,6 +624,7 @@ pub fn init<P: WebSocketPermissions + 'static>(
       prefix "deno:ext/websocket",
       "01_websocket.js",
       "02_websocketstream.js",
+      "03_libsocket.js",
     ))
     .ops(vec![
       op_ws_check_permission_and_cancel_handle::decl::<P>(),
@@ -482,6 +632,8 @@ pub fn init<P: WebSocketPermissions + 'static>(
       op_ws_send::decl(),
       op_ws_close::decl(),
       op_ws_next_event::decl(),
+      op_ls_create::decl(),
+      op_ls_next_event::decl(),
     ])
     .state(move |state| {
       state.put::<WsUserAgent>(WsUserAgent(user_agent.clone()));
