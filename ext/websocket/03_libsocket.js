@@ -25,41 +25,32 @@
     const CLOSING = 2;
     const CLOSED = 3;
 
+
+    const AsyncGetNextLsScoket = async () => {
+      return core.opAsync("op_ls_next_event", this[_rid])
+    }
+    
     class LibSocket {
 
-        [_rid];
+        [_rid] = -1;
         [_readyState] = CONNECTING;
 
         callbacks = [];
 
         constructor() {
 
-          PromisePrototypeThen(
-            core.opAsync(
-              "op_ls_create",
-            ),
-            (create) => {
-              this[_rid] = create.rid;
-              this.dispatchEvent({
-                kind: 'life',
-                value: 'open'
-              });
-              this[_eventLoop]();
-            },
-            (err) => {
-              this[_readyState] = CLOSED;
-
-              this.dispatchEvent({
-                kind: 'error', 
-                value:  { error: err, message: ErrorPrototypeToString(err) },
-              });
-
-              this.dispatchEvent({
-                kind: 'life',
-                value: 'close'
-              });
-            },
+          const create = core.opAsync(
+            "op_ls_create",
           );
+          create.then(res => {
+            console.info('LibSocket::constructor::create async res', res)
+            this[_readyState] = OPEN;
+            this[_rid] = res.rid;
+            this.dispatchEvent({
+              kind: 'life',
+              value: 'open'
+            });
+          })
         }
 
         onData(eventListenerCallback) {
@@ -67,7 +58,17 @@
         }
 
         start() {
-            this[_readyState] = OPEN;
+          setTimeout(() => {
+            if (this[_readyState] === OPEN) {
+              this.dispatchEvent({
+                kind: 'life',
+                value: 'start'
+              });
+              this[_eventLoop]();
+            } else {
+              this.start();
+            }
+          },10)
         }
 
         send(data) {
@@ -78,8 +79,8 @@
                     data = err + ''
                 }
             }
-            core.opSync(
-                "op_deno2lib",
+            core.opAsync(
+                "op_ls_send",
                 data
             )
         }
@@ -100,12 +101,17 @@
         }
 
         async [_eventLoop]() {
-            while(this[_readyState] == OPEN) {
+            console.info('_eventLoop')
+            while(true) {
+              if (this[_readyState] == OPEN) {
+                console.info('op_ls_next_event before');
                 const { kind, value } = await core.opAsync("op_ls_next_event", this[_rid])
+                console.info('op_ls_next_event res', kind, value);
                 this.dispatchEvent({
                     kind: kind,
                     value: value
                 })
+              }
             }
         }
 
@@ -142,6 +148,7 @@
 
     window.__bootstrap.libSocket = {
         LibSocket,
+        AsyncGetNextLsScoket,
         _rid,
         _readyState,
         _eventLoop

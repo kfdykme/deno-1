@@ -407,6 +407,7 @@ delete Object.prototype.__proto__;
     URLSearchParams: util.nonEnumerable(url.URLSearchParams),
     WebSocket: util.nonEnumerable(webSocket.WebSocket),
     LibSocket: util.nonEnumerable(libSocket.LibSocket),
+    AsyncGetNextLsScoket: util.nonEnumerable(libSocket.AsyncGetNextLsScoket),
     MessageChannel: util.nonEnumerable(messagePort.MessageChannel),
     MessagePort: util.nonEnumerable(messagePort.MessagePort),
     Worker: util.nonEnumerable(worker.Worker),

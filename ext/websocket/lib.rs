@@ -55,7 +55,9 @@ use lazy_static::lazy_static;
 use std::sync::mpsc;
 use std::ffi::CStr;
 use std::thread::spawn;
-
+use tokio::sync::{
+  mpsc::{channel, Receiver, Sender},
+};
 pub use tokio_tungstenite; // Re-export tokio_tungstenite
 
 #[derive(Clone)]
@@ -195,11 +197,12 @@ impl Resource for WsCancelResource {
   }
 }
 
-// static (global_lib_socket_tx, global_lib_socket_rx):{Sender<String>, Receiver<String>} = mpsc::channel();
-lazy_static! {
-  static ref NAMES: Mutex<String> = Mutex::new(String::from(""));
-}
 
+
+
+lazy_static! {
+  static ref BROADCAST_CONNECT: Mutex<Option<Sender<String>>> = Mutex::new(None);
+}
 
 #[no_mangle]
 pub extern fn lib_socket_send(command: * const i8) {
@@ -209,27 +212,24 @@ pub extern fn lib_socket_send(command: * const i8) {
   let str_slice: &str = c_str.to_str().unwrap();
   let str_buf :String  = str_slice.to_owned(); 
   
-  // lib_socket_send_message(str_buf);
-  // *global_lib_socket_message = String::from("aa");
-  let mut v = NAMES.lock().unwrap();
-  *v = str_buf;
-  // REQUEST_RECV = String::from("aa");
+  lib_socket_send_message(str_buf);
 }
 
 
 pub fn lib_socket_send_message(message: String) {
-  // let msg = 
-  // let v = global_lib_socket_message_sender_mutex.lock().unwrap();
-  // global_lib_socket_tx?.send(message).unwrap();
-  // let mut msg = global_lib_socket_message_mutex.lock().unwrap();
-  // *msg = message; 
-  // global_lib_socket_message = message;
-  // *global_lib_socket_message_mutex.lock().unwrap() = true;
-  // global_lib_socket_message_cond.notify_one();
+  let lock = BROADCAST_CONNECT.lock().unwrap();
+  let send = lock.as_ref().clone();
+  // drop(lock);
+  match send {
+    Some(x) => {
+      x.blocking_send(message);
+    },
+    None => {}
+  }
 }
 
 pub struct LsStreamResource {
-  
+  recv: AsyncRefCell<Receiver<String>>
 }
 
 impl LsStreamResource {
@@ -279,7 +279,13 @@ pub async fn op_ls_create(
   state: Rc<RefCell<OpState>>
 ) -> Result<CreateLibSocketResponse, AnyError>
 {
+
+  // in main
+  let (send, recv) = channel(128);
+  *BROADCAST_CONNECT.lock().unwrap() = Some(send);
+  
   let resource = LsStreamResource {
+    recv:  AsyncRefCell::new(recv)
   };
 
   let mut state = state.borrow_mut();
@@ -300,20 +306,23 @@ pub extern fn init_lib_socket_send_out_callback(func: extern fn(* const u8)) {
 }
 
 #[op]
-pub async fn op_deno2lib(
+pub async fn op_ls_send(
   state: Rc<RefCell<OpState>>,
   message: String
 ) -> Result<(), AnyError> 
 {
-
+  println!("op_ls_send {}", message);
   unsafe {
     if !CALLBACK_HODLER.is_none() {
+        println!("CALLBACK_HODLER is not none ");
         let callback: extern fn(* const u8) = CALLBACK_HODLER.unwrap();
         let mut send_message = message.clone();
         
         send_message.push('\0');
 
         callback(send_message.as_ptr());
+    } else {
+      println!("CALLBACK_HODLER is none ");  
     }
   }
 
@@ -544,40 +553,37 @@ pub async fn op_ls_next_event(
   state: Rc<RefCell<OpState>>,
   rid: ResourceId,
 ) -> Result<NextEventResponse, AnyError> {
-  // let msg = global_lib_socket_message_mutex.lock().unwrap();
-
-  // let cflag = global_lib_socket_message_mutex.clone();
-  // let ccond = global_lib_socket_message_cond.clone();
-  // let msg = global_lib_socket_message.clone();
-  // let hdl = spawn(move || {
-  //   let mut m = { *cflag.lock().unwrap() };
-  //     while !m {
-  //         m = *ccond.wait(cflag.lock().unwrap()).unwrap();
-  //     }
-
-  //     {
-  //         m = false;
-  //         *cflag.lock().unwrap() = false;
-  //     }
-  // });
-  // hdl.join().unwrap();
-  // let mut msg = String::from("'");
-
-  // while !msg.equal(&String::from("undefined")) {
-  //   msg = global_lib_socket_message.lock.unwrap();
-  // }
   
- 
-  let mut msg = String::from("try");
-  let empty:String = String::from("");
-  while msg.eq(&empty) {
-    let v = NAMES.lock().unwrap();
-    msg = v.clone();
-  }
+  println!("op_ls_next_event rid:{}", rid);
+  let resource = state
+    .borrow_mut()
+    .resource_table
+    .get::<LsStreamResource>(rid)?;
 
-  let mut v = NAMES.lock().unwrap();
-  *v = String::from("");
-  Ok(NextEventResponse::String(msg))
+  unsafe {
+    let recv = resource.recv.as_ptr().as_mut();
+    
+    match recv {
+      Some(r) => {
+        let msg = r.recv().await;
+        match msg {
+          Some(x) => {
+    
+            Ok(NextEventResponse::String(x))
+          },
+          None => {
+    
+            Ok(NextEventResponse::String(String::from("empty")))
+          }
+        }
+      },
+      None => {
+
+        Ok(NextEventResponse::String(String::from("empty")))
+      }
+    }
+   
+  }
 }
 
 #[op]
@@ -634,6 +640,7 @@ pub fn init<P: WebSocketPermissions + 'static>(
       op_ws_next_event::decl(),
       op_ls_create::decl(),
       op_ls_next_event::decl(),
+      op_ls_send::decl(),
     ])
     .state(move |state| {
       state.put::<WsUserAgent>(WsUserAgent(user_agent.clone()));
